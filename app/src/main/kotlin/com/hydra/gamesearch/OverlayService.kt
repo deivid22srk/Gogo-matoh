@@ -56,8 +56,10 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
 
     override fun onCreate() {
         super.onCreate()
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+        // Initialize SavedStateRegistry BEFORE moving to CREATED state
         savedStateRegistryController.performRestore(null)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         captureHelper = ScreenCaptureHelper(this)
         createNotificationChannel()
