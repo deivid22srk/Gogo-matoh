@@ -80,6 +80,7 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
 
     override fun onCreate() {
         super.onCreate()
+        // Initialize SavedStateRegistry BEFORE moving to CREATED state
         savedStateRegistryController.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
 
@@ -146,21 +147,47 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
     private fun applyComposeOwners(view: View) {
         try {
             // Set LifecycleOwner
-            val lifecycleClass = Class.forName("androidx.lifecycle.ViewTreeLifecycleOwner")
+            val lifecycleClass = try {
+                Class.forName("androidx.lifecycle.ViewTreeLifecycleOwner")
+            } catch (e: ClassNotFoundException) {
+                Class.forName("androidx.lifecycle.runtime.ViewTreeLifecycleOwner")
+            }
             val setLifecycle = lifecycleClass.getMethod("set", View::class.java, LifecycleOwner::class.java)
             setLifecycle.invoke(null, view, this)
 
             // Set ViewModelStoreOwner
-            val viewModelClass = Class.forName("androidx.lifecycle.viewmodel.ViewTreeViewModelStoreOwner")
+            val viewModelClass = try {
+                Class.forName("androidx.lifecycle.viewmodel.ViewTreeViewModelStoreOwner")
+            } catch (e: ClassNotFoundException) {
+                Class.forName("androidx.lifecycle.ViewTreeViewModelStoreOwner") // Fallback same but retry
+            }
             val setViewModel = viewModelClass.getMethod("set", View::class.java, ViewModelStoreOwner::class.java)
             setViewModel.invoke(null, view, this)
 
             // Set SavedStateRegistryOwner
-            val savedStateClass = Class.forName("androidx.savedstate.ViewTreeSavedStateRegistryOwner")
+            val savedStateClass = try {
+                Class.forName("androidx.savedstate.ViewTreeSavedStateRegistryOwner")
+            } catch (e: ClassNotFoundException) {
+                Class.forName("androidx.savedstate.ViewTreeSavedStateRegistryOwner") // Fallback same
+            }
             val setSavedState = savedStateClass.getMethod("set", View::class.java, SavedStateRegistryOwner::class.java)
             setSavedState.invoke(null, view, this)
         } catch (e: Exception) {
-            Log.e("HydraBot", "Error setting ViewTree owners via reflection", e)
+            Log.e("HydraBot", "Error setting ViewTree owners via reflection: ${e.message}")
+
+            // Extreme fallback: try to set tags by resource name if class setting fails
+            try {
+                val lifecycleId = resources.getIdentifier("view_tree_lifecycle_owner", "id", packageName)
+                if (lifecycleId != 0) view.setTag(lifecycleId, this)
+
+                val viewModelId = resources.getIdentifier("view_tree_view_model_store_owner", "id", packageName)
+                if (viewModelId != 0) view.setTag(viewModelId, this)
+
+                val savedStateId = resources.getIdentifier("view_tree_saved_state_registry_owner", "id", packageName)
+                if (savedStateId != 0) view.setTag(savedStateId, this)
+            } catch (ex: Exception) {
+                Log.e("HydraBot", "Fallback tag setting failed", ex)
+            }
         }
     }
 
