@@ -1,5 +1,6 @@
 package com.hydra.gamesearch
 
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -8,9 +9,12 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.TextUtils
+import android.view.accessibility.AccessibilityManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,14 +46,15 @@ fun SetupScreen() {
     val context = LocalContext.current
     var isAccessibilityEnabled by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
     var isOverlayEnabled by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
+    var installedServices by remember { mutableStateOf(getInstalledAccessibilityServices(context)) }
 
-    // Update state when returning from settings
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 isAccessibilityEnabled = isAccessibilityServiceEnabled(context)
                 isOverlayEnabled = Settings.canDrawOverlays(context)
+                installedServices = getInstalledAccessibilityServices(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -58,78 +63,112 @@ fun SetupScreen() {
         }
     }
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(
-            text = "Gogo Match Bot Setup",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !isAccessibilityEnabled) {
+        item {
             Text(
-                text = "Note: If the service doesn't appear or is disabled, go to App Info -> 3 dots -> 'Allow restricted settings'.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.padding(bottom = 16.dp)
+                text = "Gogo Match Bot Setup",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.padding(bottom = 8.dp)
             )
         }
 
-        PermissionItem(
-            title = "Accessibility Service",
-            isEnabled = isAccessibilityEnabled,
-            onClick = {
-                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                context.startActivity(intent)
-            }
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        PermissionItem(
-            title = "Overlay Permission",
-            isEnabled = isOverlayEnabled,
-            onClick = {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:${context.packageName}")
-                )
-                context.startActivity(intent)
-            }
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(
-            onClick = {
-                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                    data = Uri.fromParts("package", context.packageName, null)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !isAccessibilityEnabled) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Importante (Android 13+):",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Text(
+                            text = "Se o app não aparecer ou estiver desativado, vá em 'Informações do app' -> 3 pontos no topo -> 'Permitir configurações restritas'.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
                 }
-                context.startActivity(intent)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
-        ) {
-            Text("Open App Info (to allow Restricted Settings)")
+            }
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
-
-        Button(
-            onClick = {
-                if (isOverlayEnabled) {
-                    context.startForegroundService(Intent(context, OverlayService::class.java))
+        item {
+            PermissionItem(
+                title = "Serviço de Acessibilidade",
+                isEnabled = isAccessibilityEnabled,
+                onClick = {
+                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    context.startActivity(intent)
                 }
-            },
-            enabled = isAccessibilityEnabled && isOverlayEnabled,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Start Overlay Bot")
+            )
+        }
+
+        item {
+            PermissionItem(
+                title = "Sobrepor a outros apps",
+                isEnabled = isOverlayEnabled,
+                onClick = {
+                    val intent = Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:${context.packageName}")
+                    )
+                    context.startActivity(intent)
+                }
+            )
+        }
+
+        item {
+            Button(
+                onClick = {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", context.packageName, null)
+                    }
+                    context.startActivity(intent)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+            ) {
+                Text("Abrir Informações do App")
+            }
+        }
+
+        item {
+            HorizontalDivider()
+            Text(
+                text = "Diagnóstico (Serviços Detectados):",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        items(installedServices) { service ->
+            Text(
+                text = service,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    if (isOverlayEnabled) {
+                        context.startForegroundService(Intent(context, OverlayService::class.java))
+                    }
+                },
+                enabled = isAccessibilityEnabled && isOverlayEnabled,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Iniciar Bot")
+            }
         }
     }
 }
@@ -149,12 +188,12 @@ fun PermissionItem(title: String, isEnabled: Boolean, onClick: () -> Unit) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = title, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    text = if (isEnabled) "Enabled" else "Disabled",
+                    text = if (isEnabled) "Ativado" else "Desativado",
                     color = if (isEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                 )
             }
             Button(onClick = onClick) {
-                Text(if (isEnabled) "Settings" else "Enable")
+                Text(if (isEnabled) "Abrir" else "Ativar")
             }
         }
     }
@@ -179,4 +218,10 @@ fun isAccessibilityServiceEnabled(context: Context): Boolean {
     }
 
     return false
+}
+
+fun getInstalledAccessibilityServices(context: Context): List<String> {
+    val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+    val services = am.getInstalledAccessibilityServiceList()
+    return services.map { "${it.resolveInfo.serviceInfo.packageName}/${it.resolveInfo.serviceInfo.name}" }
 }
