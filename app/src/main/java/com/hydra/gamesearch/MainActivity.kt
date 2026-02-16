@@ -1,8 +1,10 @@
 package com.hydra.gamesearch
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.TextUtils
@@ -14,7 +16,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,13 +44,18 @@ fun SetupScreen() {
     var isOverlayEnabled by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
 
     // Update state when returning from settings
-    DisposableEffect(Unit) {
-        val observer = {
-            isAccessibilityEnabled = isAccessibilityServiceEnabled(context)
-            isOverlayEnabled = Settings.canDrawOverlays(context)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isAccessibilityEnabled = isAccessibilityServiceEnabled(context)
+                isOverlayEnabled = Settings.canDrawOverlays(context)
+            }
         }
-        // Simplified: in real app use LifecycleObserver
-        onDispose {}
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     Column(
@@ -58,8 +68,17 @@ fun SetupScreen() {
         Text(
             text = "Gogo Match Bot Setup",
             style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(bottom = 32.dp)
+            modifier = Modifier.padding(bottom = 16.dp)
         )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !isAccessibilityEnabled) {
+            Text(
+                text = "Note: If the service doesn't appear or is disabled, go to App Info -> 3 dots -> 'Allow restricted settings'.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+        }
 
         PermissionItem(
             title = "Accessibility Service",
@@ -83,6 +102,21 @@ fun SetupScreen() {
                 context.startActivity(intent)
             }
         )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(
+            onClick = {
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", context.packageName, null)
+                }
+                context.startActivity(intent)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+        ) {
+            Text("Open App Info (to allow Restricted Settings)")
+        }
 
         Spacer(modifier = Modifier.height(32.dp))
 
@@ -112,7 +146,7 @@ fun PermissionItem(title: String, isEnabled: Boolean, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(text = title, style = MaterialTheme.typography.titleMedium)
                 Text(
                     text = if (isEnabled) "Enabled" else "Disabled",
@@ -120,33 +154,29 @@ fun PermissionItem(title: String, isEnabled: Boolean, onClick: () -> Unit) {
                 )
             }
             Button(onClick = onClick) {
-                Text(if (isEnabled) "Open Settings" else "Enable")
+                Text(if (isEnabled) "Settings" else "Enable")
             }
         }
     }
 }
 
 fun isAccessibilityServiceEnabled(context: Context): Boolean {
-    val service = "${context.packageName}/${GogoAccessibilityService::class.java.canonicalName}"
-    val accessibilityEnabled = Settings.Secure.getInt(
+    val expectedComponentName = ComponentName(context, GogoAccessibilityService::class.java)
+    val enabledServices = Settings.Secure.getString(
         context.contentResolver,
-        Settings.Secure.ACCESSIBILITY_ENABLED, 0
-    )
-    if (accessibilityEnabled == 1) {
-        val settingValue = Settings.Secure.getString(
-            context.contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        )
-        if (settingValue != null) {
-            val splitter = TextUtils.SimpleStringSplitter(':')
-            splitter.setString(settingValue)
-            while (splitter.hasNext()) {
-                val accessabilityService = splitter.next()
-                if (accessabilityService.equals(service, ignoreCase = true)) {
-                    return true
-                }
-            }
+        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+    ) ?: return false
+
+    val colonSplitter = TextUtils.SimpleStringSplitter(':')
+    colonSplitter.setString(enabledServices)
+
+    while (colonSplitter.hasNext()) {
+        val componentNameString = colonSplitter.next()
+        val enabledService = ComponentName.unflattenFromString(componentNameString)
+        if (enabledService != null && enabledService == expectedComponentName) {
+            return true
         }
     }
+
     return false
 }
