@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -47,6 +48,7 @@ fun SetupScreen() {
     var isAccessibilityEnabled by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
     var isOverlayEnabled by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var installedServices by remember { mutableStateOf(getInstalledAccessibilityServices(context)) }
+    var appInfo by remember { mutableStateOf(getAppDiagnostic(context)) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -55,6 +57,7 @@ fun SetupScreen() {
                 isAccessibilityEnabled = isAccessibilityServiceEnabled(context)
                 isOverlayEnabled = Settings.canDrawOverlays(context)
                 installedServices = getInstalledAccessibilityServices(context)
+                appInfo = getAppDiagnostic(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -78,6 +81,17 @@ fun SetupScreen() {
             )
         }
 
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(text = "Informações do App:", style = MaterialTheme.typography.titleSmall)
+                    Text(text = appInfo, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !isAccessibilityEnabled) {
             item {
                 Card(
@@ -90,7 +104,7 @@ fun SetupScreen() {
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
                         Text(
-                            text = "Se o app não aparecer ou estiver desativado, vá em 'Informações do app' -> 3 pontos no topo -> 'Permitir configurações restritas'.",
+                            text = "Se o app não aparecer ou estiver desativado, você PRECISA liberar as 'Configurações restritas' nas Informações do App.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
@@ -142,7 +156,7 @@ fun SetupScreen() {
         item {
             HorizontalDivider()
             Text(
-                text = "Diagnóstico (Serviços Detectados):",
+                text = "Serviços de Acessibilidade Instalados:",
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -152,7 +166,8 @@ fun SetupScreen() {
             Text(
                 text = service,
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                color = if (service.contains(context.packageName)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
             )
         }
 
@@ -224,4 +239,15 @@ fun getInstalledAccessibilityServices(context: Context): List<String> {
     val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
     val services = am.getInstalledAccessibilityServiceList()
     return services.map { "${it.resolveInfo.serviceInfo.packageName}/${it.resolveInfo.serviceInfo.name}" }
+}
+
+fun getAppDiagnostic(context: Context): String {
+    return try {
+        val pm = context.packageManager
+        val info = pm.getPackageInfo(context.packageName, PackageManager.GET_SERVICES)
+        val services = info.services?.map { it.name }?.joinToString("\n") ?: "Nenhum serviço encontrado"
+        "Package: ${context.packageName}\nServices:\n$services"
+    } catch (e: Exception) {
+        "Erro ao obter diagnóstico: ${e.message}"
+    }
 }

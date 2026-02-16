@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.hydra.gamesearch"
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" tools:ignore="ProtectedPermissions" />
 
     <application
         android:allowBackup="true"
@@ -15,8 +15,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.HydraGameSearch"
         tools:targetApi="34">
+
         <activity
-            android:name=".MainActivity"
+            android:name="com.hydra.gamesearch.MainActivity"
             android:exported="true"
             android:theme="@style/Theme.HydraGameSearch">
             <intent-filter>
@@ -26,9 +27,9 @@
         </activity>
 
         <service
-            android:name=".GogoAccessibilityService"
+            android:name="com.hydra.gamesearch.GogoAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:label="@string/accessibility_service_label"
+            android:label="Gogo Match Helper"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
@@ -40,7 +41,7 @@
         </service>
 
         <service
-            android:name=".OverlayService"
+            android:name="com.hydra.gamesearch.OverlayService"
             android:exported="false"
             android:foregroundServiceType="specialUse" />
 
