@@ -27,10 +27,19 @@ class ScreenCaptureHelper(private val context: Context) {
     private var imageReader: ImageReader? = null
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val metrics = DisplayMetrics()
+    private val handler = Handler(Looper.getMainLooper())
 
     fun startCapture(resultCode: Int, data: Intent) {
         val mpManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         mediaProjection = mpManager.getMediaProjection(resultCode, data)
+
+        // Android 14 (API 34) requirement: register callback before creating VirtualDisplay
+        mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() {
+                super.onStop()
+                stopCapture()
+            }
+        }, handler)
 
         windowManager.defaultDisplay.getRealMetrics(metrics)
 
@@ -43,7 +52,7 @@ class ScreenCaptureHelper(private val context: Context) {
             metrics.densityDpi,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             imageReader?.surface,
-            null, null
+            null, handler
         )
     }
 
@@ -54,28 +63,36 @@ class ScreenCaptureHelper(private val context: Context) {
             return
         }
 
-        val planes = image.planes
-        val buffer: ByteBuffer = planes[0].buffer
-        val pixelStride = planes[0].pixelStride
-        val rowStride = planes[0].rowStride
-        val rowPadding = rowStride - pixelStride * metrics.widthPixels
+        try {
+            val planes = image.planes
+            val buffer: ByteBuffer = planes[0].buffer
+            val pixelStride = planes[0].pixelStride
+            val rowStride = planes[0].rowStride
+            val rowPadding = rowStride - pixelStride * metrics.widthPixels
 
-        val bitmap = Bitmap.createBitmap(
-            metrics.widthPixels + rowPadding / pixelStride,
-            metrics.heightPixels,
-            Bitmap.Config.ARGB_8888
-        )
-        bitmap.copyPixelsFromBuffer(buffer)
-        image.close()
+            val bitmap = Bitmap.createBitmap(
+                metrics.widthPixels + rowPadding / pixelStride,
+                metrics.heightPixels,
+                Bitmap.Config.ARGB_8888
+            )
+            bitmap.copyPixelsFromBuffer(buffer)
 
-        // Crop the bitmap to remove padding
-        val cleanBitmap = Bitmap.createBitmap(bitmap, 0, 0, metrics.widthPixels, metrics.heightPixels)
-        callback(cleanBitmap)
+            // Crop the bitmap to remove padding
+            val cleanBitmap = Bitmap.createBitmap(bitmap, 0, 0, metrics.widthPixels, metrics.heightPixels)
+            callback(cleanBitmap)
+        } catch (e: Exception) {
+            Log.e("HydraCapture", "Error capturing bitmap", e)
+            callback(null)
+        } finally {
+            image.close()
+        }
     }
 
     fun stopCapture() {
         virtualDisplay?.release()
+        virtualDisplay = null
         imageReader?.close()
+        imageReader = null
         mediaProjection?.stop()
         mediaProjection = null
     }

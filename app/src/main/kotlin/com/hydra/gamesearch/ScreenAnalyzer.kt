@@ -35,7 +35,7 @@ class ScreenAnalyzer {
 
                 // Sample a few pixels around the center to create a simple "fingerprint"
                 val hash = sampleCell(bitmap, centerX, centerY)
-                if (hash != 0L && !isBackground(hash)) {
+                if (hash != 0L) {
                     cellHashes.add(Triple(col, row, hash))
                 }
             }
@@ -49,7 +49,7 @@ class ScreenAnalyzer {
                 val c1 = cellHashes[i]
                 val c2 = cellHashes[j]
 
-                if (areSimilar(c1.third, c2.third)) {
+                if (c1.third == c2.third && c1.third != -1L) {
                     // Convert grid coords to screen pixels for the move
                     val x1 = gridLeft + c1.first * cellWidth + cellWidth / 2
                     val y1 = gridTop + c1.second * cellHeight + cellHeight / 2
@@ -65,12 +65,17 @@ class ScreenAnalyzer {
     }
 
     private fun sampleCell(bitmap: Bitmap, cx: Int, cy: Int): Long {
-        if (cx < 5 || cy < 5 || cx > bitmap.width - 5 || cy > bitmap.height - 5) return 0L
+        if (cx < 10 || cy < 10 || cx > bitmap.width - 10 || cy > bitmap.height - 10) return 0L
+
+        // Check if it's likely a game item and not background
+        // Simple heuristic: get center color and check if it's not a generic background color
+        val centerColor = bitmap.getPixel(cx, cy)
+        if (isBackgroundColor(centerColor)) return -1L
 
         // Simple hash: combine color values of 5 points
         var h = 0L
         val points = arrayOf(
-            Pair(0, 0), Pair(-2, -2), Pair(2, 2), Pair(-2, 2), Pair(2, -2)
+            Pair(0, 0), Pair(-4, -4), Pair(4, 4), Pair(-4, 4), Pair(4, -4)
         )
 
         for (p in points) {
@@ -80,14 +85,17 @@ class ScreenAnalyzer {
         return h
     }
 
-    private fun isBackground(hash: Long): Boolean {
-        // Heuristic: background in Merge Boss is often a specific shade of gray/blue
-        // For now we'll just check if it's not too dark or too light
-        return false
-    }
+    private fun isBackgroundColor(color: Int): Boolean {
+        val r = Color.red(color)
+        val g = Color.green(color)
+        val b = Color.blue(color)
 
-    private fun areSimilar(h1: Long, h2: Long): Boolean {
-        // In this simple version, we want exact matches of our samples
-        return h1 == h2
+        // Merge Boss background is often light gray or light blue
+        // These colors have very low saturation
+        val max = maxOf(r, g, b)
+        val min = minOf(r, g, b)
+        val saturation = if (max == 0) 0 else (max - min) * 100 / max
+
+        return saturation < 5 // Very low saturation is likely background or empty cell
     }
 }

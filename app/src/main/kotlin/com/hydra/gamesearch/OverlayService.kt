@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.os.*
+import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
 import androidx.compose.animation.core.*
@@ -70,15 +71,30 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
 
         if (intent?.action == "START_CAPTURE") {
             val resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED)
-            val data = intent.getParcelableExtra<Intent>("data")
+
+            @Suppress("DEPRECATION")
+            val data = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra("data", Intent::class.java)
+            } else {
+                intent.getParcelableExtra("data")
+            }
+
             if (data != null) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    startForeground(1, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-                } else {
-                    startForeground(1, createNotification())
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        startForeground(1, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+                    } else {
+                        startForeground(1, createNotification())
+                    }
+
+                    // Small delay to ensure the system processes the foreground status before creating VirtualDisplay
+                    Handler(Looper.getMainLooper()).post {
+                        captureHelper.startCapture(resultCode, data)
+                        showFloatingButton()
+                    }
+                } catch (e: Exception) {
+                    Log.e("HydraBot", "Failed to start foreground service or capture", e)
                 }
-                captureHelper.startCapture(resultCode, data)
-                showFloatingButton()
             }
         }
 
@@ -101,6 +117,8 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
             .setContentTitle("Hydra Bot Ativo")
             .setContentText("Analisando tela do jogo...")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }
 
@@ -246,7 +264,11 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
     override fun onDestroy() {
         super.onDestroy()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
-        if (floatingView != null) windowManager.removeView(floatingView)
+        if (floatingView != null) {
+            try {
+                windowManager.removeView(floatingView)
+            } catch (e: Exception) {}
+        }
         if (moveOverlayView != null) {
             try {
                 windowManager.removeView(moveOverlayView)
