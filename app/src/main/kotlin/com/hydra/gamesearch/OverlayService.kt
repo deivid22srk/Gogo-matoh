@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -92,6 +94,12 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d("HydraBot", "OverlayService.onStartCommand action=${intent?.action}")
+
+        if (intent?.action == "STOP_SERVICE") {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
 
         if (intent?.action == "START_CAPTURE") {
@@ -120,10 +128,7 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                     }
                 } catch (e: Exception) {
                     Log.e("HydraBot", "Failed to start foreground service or capture", e)
-                    Toast.makeText(this, "Erro ao iniciar captura: ${e.message}", Toast.LENGTH_LONG).show()
                 }
-            } else {
-                Log.e("HydraBot", "No data intent received for capture")
             }
         }
 
@@ -142,45 +147,60 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
     }
 
     private fun createNotification(): Notification {
+        val stopIntent = Intent(this, OverlayService::class.java).apply {
+            action = "STOP_SERVICE"
+        }
+        val stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE)
+
         return NotificationCompat.Builder(this, "hydra_bot")
             .setContentTitle("Hydra Bot Ativo")
             .setContentText("Analisando tela do jogo...")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Parar", stopPendingIntent)
             .build()
     }
 
     private fun applyComposeOwners(view: View) {
-        try {
-            val lifecycleClass = try {
-                Class.forName("androidx.lifecycle.ViewTreeLifecycleOwner")
-            } catch (e: Exception) {
-                Class.forName("androidx.lifecycle.runtime.ViewTreeLifecycleOwner")
+        val owners = listOf(
+            Triple("androidx.lifecycle.ViewTreeLifecycleOwner", "view_tree_lifecycle_owner", "androidx.lifecycle.runtime"),
+            Triple("androidx.lifecycle.viewmodel.ViewTreeViewModelStoreOwner", "view_tree_view_model_store_owner", "androidx.lifecycle.viewmodel"),
+            Triple("androidx.savedstate.ViewTreeSavedStateRegistryOwner", "view_tree_saved_state_registry_owner", "androidx.savedstate")
+        )
+
+        for ((className, resName, pkgName) in owners) {
+            var success = false
+            try {
+                val clazz = Class.forName(className)
+                val ownerType = when(className) {
+                    "androidx.lifecycle.ViewTreeLifecycleOwner" -> LifecycleOwner::class.java
+                    "androidx.lifecycle.viewmodel.ViewTreeViewModelStoreOwner" -> ViewModelStoreOwner::class.java
+                    "androidx.savedstate.ViewTreeSavedStateRegistryOwner" -> SavedStateRegistryOwner::class.java
+                    else -> Any::class.java
+                }
+                val method = clazz.getMethod("set", View::class.java, ownerType)
+                method.invoke(null, view, this)
+                success = true
+            } catch (e: Exception) { }
+
+            if (!success) {
+                val pkgs = listOf(pkgName, packageName)
+                var foundId = 0
+                for (p in pkgs) {
+                    foundId = resources.getIdentifier(resName, "id", p)
+                    if (foundId != 0) break
+                }
+                if (foundId != 0) view.setTag(foundId, this)
             }
-            lifecycleClass.getMethod("set", View::class.java, LifecycleOwner::class.java)
-                .invoke(null, view, this)
-
-            Class.forName("androidx.lifecycle.viewmodel.ViewTreeViewModelStoreOwner")
-                .getMethod("set", View::class.java, ViewModelStoreOwner::class.java)
-                .invoke(null, view, this)
-
-            Class.forName("androidx.savedstate.ViewTreeSavedStateRegistryOwner")
-                .getMethod("set", View::class.java, SavedStateRegistryOwner::class.java)
-                .invoke(null, view, this)
-        } catch (e: Exception) {
-            Log.e("HydraBot", "Error setting ViewTree owners: ${e.message}")
         }
     }
 
     private fun showFloatingButton() {
         if (floatingView != null) return
-        Log.d("HydraBot", "Adding floating button to window")
-
         val sizePx = (64 * resources.displayMetrics.density).toInt()
         val params = WindowManager.LayoutParams(
-            sizePx,
-            sizePx,
+            sizePx, sizePx,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
@@ -200,37 +220,26 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                         LocalSavedStateRegistryOwner provides this@OverlayService
                     ) {
                         var isScanning by remember { mutableStateOf(false) }
-
                         Card(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .pointerInput(Unit) {
-                                    detectDragGestures { change, dragAmount ->
-                                        change.consume()
-                                        params.x += dragAmount.x.roundToInt()
-                                        params.y += dragAmount.y.roundToInt()
-                                        windowManager.updateViewLayout(this@apply, params)
-                                    }
-                                },
+                            modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+                                detectDragGestures { change, dragAmount ->
+                                    change.consume()
+                                    params.x += dragAmount.x.roundToInt()
+                                    params.y += dragAmount.y.roundToInt()
+                                    windowManager.updateViewLayout(this@apply, params)
+                                }
+                            },
                             shape = RoundedCornerShape(32.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isScanning) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer
-                            ),
+                            colors = CardDefaults.cardColors(containerColor = if (isScanning) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer),
                             elevation = CardDefaults.cardElevation(defaultElevation = 12.dp)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 IconButton(onClick = {
-                                    Log.d("HydraBot", "Scan button clicked")
                                     isScanning = true
-                                    captureAndAnalyze {
-                                        isScanning = false
-                                    }
+                                    captureAndAnalyze { isScanning = false }
                                 }) {
-                                    if (isScanning) {
-                                        CircularProgressIndicator(modifier = Modifier.size(32.dp))
-                                    } else {
-                                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(32.dp))
-                                    }
+                                    if (isScanning) CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                                    else Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(32.dp))
                                 }
                             }
                         }
@@ -238,30 +247,15 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                 }
             }
         }
-
-        try {
-            windowManager.addView(floatingView, params)
-            Log.d("HydraBot", "Floating button added successfully")
-        } catch (e: Exception) {
-            Log.e("HydraBot", "Failed to add floating button", e)
-        }
+        windowManager.addView(floatingView, params)
     }
 
     private fun captureAndAnalyze(onComplete: () -> Unit) {
         captureHelper.captureBitmap { bitmap ->
             if (bitmap != null) {
-                Log.d("HydraBot", "Bitmap captured, analyzing...")
                 val move = analyzer.findBestMove(bitmap)
-                if (move != null) {
-                    Log.d("HydraBot", "Move found: $move")
-                    showMoveOverlay(move)
-                } else {
-                    Log.d("HydraBot", "No move found")
-                    Toast.makeText(this, "Nenhuma jogada detectada", Toast.LENGTH_SHORT).show()
-                }
-            } else {
-                Log.e("HydraBot", "Failed to capture bitmap")
-                Toast.makeText(this, "Erro ao capturar tela", Toast.LENGTH_SHORT).show()
+                if (move != null) showMoveOverlay(move)
+                else Toast.makeText(this, "Nenhuma jogada detectada", Toast.LENGTH_SHORT).show()
             }
             onComplete()
         }
@@ -269,19 +263,14 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
 
     private fun showMoveOverlay(move: ScreenAnalyzer.Move) {
         if (moveOverlayView != null) {
-            try {
-                windowManager.removeView(moveOverlayView)
-            } catch (e: Exception) {}
+            try { windowManager.removeView(moveOverlayView) } catch (e: Exception) {}
         }
-
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         )
-
         moveOverlayView = ComposeView(this).apply {
             applyComposeOwners(this)
             setContent {
@@ -291,61 +280,32 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                         LocalViewModelStoreOwner provides this@OverlayService,
                         LocalSavedStateRegistryOwner provides this@OverlayService
                     ) {
-                        val alpha by animateFloatAsState(
-                            targetValue = 1f,
-                            animationSpec = tween(500)
-                        )
-
+                        val alpha by animateFloatAsState(targetValue = 1f, animationSpec = tween(500))
                         Canvas(modifier = Modifier.fillMaxSize()) {
                             val color = Color.Magenta
                             drawCircle(color, radius = 40f, center = Offset(move.fromX.toFloat(), move.fromY.toFloat()), alpha = alpha)
-                            drawLine(
-                                color = color,
-                                start = Offset(move.fromX.toFloat(), move.fromY.toFloat()),
-                                end = Offset(move.toX.toFloat(), move.toY.toFloat()),
-                                strokeWidth = 10f,
-                                alpha = alpha
-                            )
+                            drawLine(color = color, start = Offset(move.fromX.toFloat(), move.fromY.toFloat()), end = Offset(move.toX.toFloat(), move.toY.toFloat()), strokeWidth = 10f, alpha = alpha)
                             drawCircle(color, radius = 20f, center = Offset(move.toX.toFloat(), move.toY.toFloat()), alpha = alpha)
                         }
                     }
                 }
             }
         }
-
-        try {
-            windowManager.addView(moveOverlayView, params)
-        } catch (e: Exception) {
-            Log.e("HydraBot", "Failed to add move overlay", e)
-        }
-
-        // Hide after 3 seconds
+        windowManager.addView(moveOverlayView, params)
         Handler(Looper.getMainLooper()).postDelayed({
             if (moveOverlayView != null) {
-                try {
-                    windowManager.removeView(moveOverlayView)
-                } catch (e: Exception) {}
+                try { windowManager.removeView(moveOverlayView) } catch (e: Exception) {}
                 moveOverlayView = null
             }
         }, 3000)
     }
 
     override fun onDestroy() {
-        Log.d("HydraBot", "OverlayService.onDestroy")
         super.onDestroy()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
-        if (floatingView != null) {
-            try {
-                windowManager.removeView(floatingView)
-            } catch (e: Exception) {}
-        }
-        if (moveOverlayView != null) {
-            try {
-                windowManager.removeView(moveOverlayView)
-            } catch (e: Exception) {}
-        }
+        if (floatingView != null) { try { windowManager.removeView(floatingView) } catch (e: Exception) {} }
+        if (moveOverlayView != null) { try { windowManager.removeView(moveOverlayView) } catch (e: Exception) {} }
         captureHelper.stopCapture()
     }
-
     override fun onBind(intent: Intent?): IBinder? = null
 }
