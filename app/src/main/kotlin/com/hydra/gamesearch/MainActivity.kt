@@ -10,12 +10,12 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -37,7 +37,9 @@ class MainActivity : ComponentActivity() {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
-        // Handle notification permission grant
+        if (!isGranted) {
+            Toast.makeText(this, "Permissão de notificação negada", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private val captureLauncher = registerForActivityResult(
@@ -49,7 +51,14 @@ class MainActivity : ComponentActivity() {
                 putExtra("data", result.data)
                 action = "START_CAPTURE"
             }
-            ContextCompat.startForegroundService(this, serviceIntent)
+            try {
+                ContextCompat.startForegroundService(this, serviceIntent)
+                Toast.makeText(this, "Serviço iniciado!", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(this, "Falha ao iniciar serviço: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        } else {
+            Toast.makeText(this, "Captura de tela cancelada", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -92,7 +101,7 @@ class MainActivity : ComponentActivity() {
                         Spacer(modifier = Modifier.height(48.dp))
 
                         PermissionButton(
-                            text = "Permitir Sobreposição",
+                            text = "1. Permitir Sobreposição",
                             icon = Icons.Default.Settings,
                             onClick = {
                                 if (!Settings.canDrawOverlays(this@MainActivity)) {
@@ -101,6 +110,8 @@ class MainActivity : ComponentActivity() {
                                         Uri.parse("package:$packageName")
                                     )
                                     startActivity(intent)
+                                } else {
+                                    Toast.makeText(this@MainActivity, "Sobreposição já permitida", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         )
@@ -108,11 +119,17 @@ class MainActivity : ComponentActivity() {
                         Spacer(modifier = Modifier.height(16.dp))
 
                         PermissionButton(
-                            text = "Iniciar Captura de Tela",
+                            text = "2. Iniciar Bot",
                             icon = Icons.Default.PlayArrow,
                             onClick = {
                                 if (Settings.canDrawOverlays(this@MainActivity)) {
-                                    captureLauncher.launch(projectionManager.createScreenCaptureIntent())
+                                    try {
+                                        captureLauncher.launch(projectionManager.createScreenCaptureIntent())
+                                    } catch (e: Exception) {
+                                        Toast.makeText(this@MainActivity, "Erro ao abrir captura: ${e.message}", Toast.LENGTH_LONG).show()
+                                    }
+                                } else {
+                                    Toast.makeText(this@MainActivity, "Permita a sobreposição primeiro!", Toast.LENGTH_LONG).show()
                                 }
                             }
                         )
@@ -120,7 +137,7 @@ class MainActivity : ComponentActivity() {
                         Spacer(modifier = Modifier.height(32.dp))
 
                         Text(
-                            text = "Dica: Após iniciar a captura, um ícone flutuante aparecerá na tela do jogo.",
+                            text = "Dica: Após clicar em 'Iniciar Bot', autorize a captura e procure pelo ícone de lupa na tela do seu jogo.",
                             fontSize = 14.sp,
                             color = MaterialTheme.colorScheme.outline,
                             textAlign = TextAlign.Center,
