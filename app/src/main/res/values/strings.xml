@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Hydra Game Search</string>
+    <string name="accessibility_service_label">AA-Gogo Helper</string>
+    <string name="accessibility_service_description">This service helps you play Gogo Match by analyzing the screen and performing moves automatically.</string>
+</resources>
