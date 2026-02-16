@@ -1,29 +1,46 @@
 package com.hydra.gamesearch
 
-import android.app.*
+import android.app.Activity
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
-import android.os.*
+import android.os.Build
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -32,9 +49,15 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalSavedStateRegistryOwner
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.*
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
-import androidx.savedstate.*
+import androidx.savedstate.SavedStateRegistry
+import androidx.savedstate.SavedStateRegistryController
+import androidx.savedstate.SavedStateRegistryOwner
 import androidx.core.app.NotificationCompat
 import kotlin.math.roundToInt
 
@@ -57,7 +80,6 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
 
     override fun onCreate() {
         super.onCreate()
-        // Initialize SavedStateRegistry BEFORE moving to CREATED state
         savedStateRegistryController.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
 
@@ -87,7 +109,6 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                         startForeground(1, createNotification())
                     }
 
-                    // Small delay to ensure the system processes the foreground status before creating VirtualDisplay
                     Handler(Looper.getMainLooper()).post {
                         captureHelper.startCapture(resultCode, data)
                         showFloatingButton()
@@ -122,6 +143,27 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
             .build()
     }
 
+    private fun applyComposeOwners(view: View) {
+        try {
+            // Set LifecycleOwner
+            val lifecycleClass = Class.forName("androidx.lifecycle.ViewTreeLifecycleOwner")
+            val setLifecycle = lifecycleClass.getMethod("set", View::class.java, LifecycleOwner::class.java)
+            setLifecycle.invoke(null, view, this)
+
+            // Set ViewModelStoreOwner
+            val viewModelClass = Class.forName("androidx.lifecycle.viewmodel.ViewTreeViewModelStoreOwner")
+            val setViewModel = viewModelClass.getMethod("set", View::class.java, ViewModelStoreOwner::class.java)
+            setViewModel.invoke(null, view, this)
+
+            // Set SavedStateRegistryOwner
+            val savedStateClass = Class.forName("androidx.savedstate.ViewTreeSavedStateRegistryOwner")
+            val setSavedState = savedStateClass.getMethod("set", View::class.java, SavedStateRegistryOwner::class.java)
+            setSavedState.invoke(null, view, this)
+        } catch (e: Exception) {
+            Log.e("HydraBot", "Error setting ViewTree owners via reflection", e)
+        }
+    }
+
     private fun showFloatingButton() {
         if (floatingView != null) return
 
@@ -138,6 +180,7 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
         }
 
         floatingView = ComposeView(this).apply {
+            applyComposeOwners(this)
             setContent {
                 MaterialTheme {
                     CompositionLocalProvider(
@@ -219,6 +262,7 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
         )
 
         moveOverlayView = ComposeView(this).apply {
+            applyComposeOwners(this)
             setContent {
                 MaterialTheme {
                     CompositionLocalProvider(
